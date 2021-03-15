@@ -92,6 +92,9 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net472' ">
     <Compile Remove="*.cs" />
     <Compile Include="ClaimsPrincipalExtensions.cs" />
+    <Compile Include="ITokenAcquisition.cs" />
+    <Compile Include="TokenAcquisition.cs" />
+    <Compile Include="TokenAcquisitionOptions.cs" />
     <Compile Remove="AppServicesAuth\**" />
     <Compile Remove="DownstreamWebApiSupport\**" />
     <Compile Remove="InstanceDiscovery\**" />
@@ -101,6 +104,9 @@
     <Compile Remove="TokenCacheProviders\Session\**" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="5.0.0" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="5.0.0" />
+    <PackageReference Include="Microsoft.Net.Http.Headers" Version="2.2.8" />
+    <PackageReference Include="System.Net.Http" Version="4.3.4" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="6.8.0" />
   </ItemGroup>
   
   <ItemGroup>
