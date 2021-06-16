@@ -1,17 +1,16 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.Resource;
-using System.Collections.Generic;
-using System.IdentityModel.Tokens.Jwt;
-using System.Linq;
-using System.Net.Http;
-using System.Threading;
-using System.Threading.Tasks;
 using TodoListService.Models;
 
 namespace TodoListService.Controllers
@@ -26,11 +25,15 @@ namespace TodoListService.Controllers
         // In-memory TodoList
         private static readonly Dictionary<int, Todo> TodoStore = new Dictionary<int, Todo>();
 
+        ILongRunningProcessContextFactory _longRunningProcessAssertionCache;
+
         public TodoListController(
             IHttpContextAccessor contextAccessor,
-            ITokenAcquisition tokenAcquisition)
+            ITokenAcquisition tokenAcquisition,
+            ILongRunningProcessContextFactory longRunningProcessAssertionCache)
         {
             _tokenAcquisition = tokenAcquisition;
+            _longRunningProcessAssertionCache = longRunningProcessAssertionCache;
 
             // Pre-populate with sample data
             if (TodoStore.Count == 0)
@@ -68,17 +71,18 @@ namespace TodoListService.Controllers
         private void RegisterPeriodicCallbackForLongProcessing()
         {
             // Get the token incoming to the web API - we could do better here.
-            var token = (HttpContext.Items["JwtSecurityTokenUsedToCallWebAPI"] as JwtSecurityToken).RawData;
+            string key = _longRunningProcessAssertionCache.CreateKey(HttpContext);
 
             // Build the URL to the callback controller, based on the request.
             var request = HttpContext.Request;
-            string url = request.Scheme + "://" + request.Host + request.Path.Value.Replace("todolist", "callback");
+            string url = request.Scheme + "://" + request.Host + request.Path.Value.Replace("todolist", "callback") + $"?key={key}";
 
             // Setup a timer so that the API calls back the callback every 10 mins.
             Timer timer = new Timer(async (state) =>
             {
                 HttpClient httpClient = new HttpClient();
-                httpClient.DefaultRequestHeaders.Add("Authorization", $"bearer {token}");
+
+                // We could protect the endpoint (OBO on itself)
                 var message = await httpClient.GetAsync(url);
             }, null, 1000, 1000 * 60 * 10);
         }

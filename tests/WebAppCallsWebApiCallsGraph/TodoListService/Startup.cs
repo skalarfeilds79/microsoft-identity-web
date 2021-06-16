@@ -63,6 +63,7 @@ namespace TodoListService
 #endif
 
             services.AddControllers();
+            services.AddSingleton<ILongRunningProcessContextFactory, LongRunningProcessContextFactory>();
 
             // below code is how customers would use a proxy
             //services.Configure<AadIssuerValidatorOptions>(options => { options.HttpClientName = "cats"; });
