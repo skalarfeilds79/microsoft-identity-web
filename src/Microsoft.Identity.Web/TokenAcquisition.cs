@@ -155,19 +155,36 @@ namespace Microsoft.Identity.Web
                 var application = GetOrBuildConfidentialClientApplication(mergedOptions);
 
                 context.TokenEndpointRequest.Parameters.TryGetValue(OAuthConstants.CodeVerifierKey, out string? codeVerifier);
+
+                string? clientInfo = context!.ProtocolMessage?.GetParameter(ClaimConstants.ClientInfo);
+                string? upn = string.Empty;
+                if (!string.IsNullOrEmpty(clientInfo))
+                {
+                    ClientInfo? clientInfoFromAuthorize = ClientInfo.CreateFromJson(clientInfo);
+                    if (clientInfoFromAuthorize != null && clientInfoFromAuthorize.UniqueTenantIdentifier != null && clientInfoFromAuthorize.UniqueObjectIdentifier != null)
+                    {
+                        upn = $"{clientInfoFromAuthorize.UniqueObjectIdentifier}@{clientInfoFromAuthorize.UniqueTenantIdentifier}";
+                    }
+                }
+
                 // Do not share the access token with ASP.NET Core otherwise ASP.NET will cache it and will not send the OAuth 2.0 request in
                 // case a further call to AcquireTokenByAuthorizationCodeAsync in the future is required for incremental consent (getting a code requesting more scopes)
                 // Share the ID token though
                 var builder = application
-                    .AcquireTokenByAuthorizationCode(scopes.Except(_scopesRequestedByMsal), context.ProtocolMessage.Code)
-                    .WithSendX5C(mergedOptions.SendX5C)
-                    .WithPkceCodeVerifier(codeVerifier);
+                .AcquireTokenByAuthorizationCode(scopes.Except(_scopesRequestedByMsal), context!.ProtocolMessage!.Code)
+                .WithSendX5C(mergedOptions.SendX5C)
+                .WithPkceCodeVerifier(codeVerifier);
 
                 if (mergedOptions.IsB2C)
                 {
                     string? userFlow = context.Principal?.GetUserFlowId();
                     var authority = $"{mergedOptions.Instance}{ClaimConstants.Tfp}/{mergedOptions.Domain}/{userFlow ?? mergedOptions.DefaultUserFlow}";
                     builder.WithB2CAuthority(authority);
+                }
+
+                if (!string.IsNullOrEmpty(upn))
+                {
+                    builder.WithCcsRoutingHint(upn);
                 }
 
                 var result = await builder.ExecuteAsync()
@@ -278,7 +295,12 @@ namespace Microsoft.Identity.Web
 
                 // Retry
                 retryClientCertificate = true;
-                return await GetAuthenticationResultForUserAsync(scopes, tenantId: tenantId, userFlow: userFlow, user: user, tokenAcquisitionOptions: tokenAcquisitionOptions).ConfigureAwait(false);
+                return await GetAuthenticationResultForUserAsync(
+                    scopes,
+                    tenantId: tenantId,
+                    userFlow: userFlow,
+                    user: user,
+                    tokenAcquisitionOptions: tokenAcquisitionOptions).ConfigureAwait(false);
             }
             catch (MsalUiRequiredException ex)
             {
@@ -292,21 +314,6 @@ namespace Microsoft.Identity.Web
             finally
             {
                 retryClientCertificate = false;
-            }
-        }
-
-        private void LogAuthResult(AuthenticationResult? authenticationResult)
-        {
-            if (authenticationResult != null)
-            {
-                Logger.TokenAcquisitionMsalAuthenticationResultTime(
-                _logger,
-                authenticationResult.AuthenticationResultMetadata.DurationTotalInMs,
-                authenticationResult.AuthenticationResultMetadata.DurationInHttpInMs,
-                authenticationResult.AuthenticationResultMetadata.DurationInCacheInMs,
-                authenticationResult.AuthenticationResultMetadata.TokenSource.ToString(),
-                authenticationResult.CorrelationId.ToString(),
-                null);
             }
         }
 
@@ -741,12 +748,20 @@ namespace Microsoft.Identity.Web
                     // In the case the token is a JWE (encrypted token), we use the decrypted token.
                     string tokenUsedToCallTheWebApi = validatedToken.InnerToken == null ? validatedToken.RawData
                                                 : validatedToken.InnerToken.RawData;
+
+                    string oid = CreateCcsRoutingHintFromHttpContext();
+
                     var builder = application
                                     .AcquireTokenOnBehalfOf(
                                         scopes.Except(_scopesRequestedByMsal),
                                         new UserAssertion(tokenUsedToCallTheWebApi))
                                     .WithSendX5C(mergedOptions.SendX5C)
                                     .WithAuthority(authority);
+
+                    if (!string.IsNullOrEmpty(oid))
+                    {
+                        builder.WithCcsRoutingHint(oid);
+                    }
 
                     if (tokenAcquisitionOptions != null)
                     {
@@ -774,6 +789,22 @@ namespace Microsoft.Identity.Web
                     ex);
                 throw;
             }
+        }
+
+        private string CreateCcsRoutingHintFromHttpContext()
+        {
+            ClaimsPrincipal? user = GetUserFromHttpContext();
+            if (user != null)
+            {
+                string? oid = user.GetHomeObjectId();
+                string? tid = user.GetTenantId();
+                if (!string.IsNullOrEmpty(oid) && !string.IsNullOrEmpty(tid))
+                {
+                    return $"{user.GetHomeObjectId()}@{user.GetTenantId()}";
+                }
+            }
+
+            return string.Empty;
         }
 
         /// <summary>
@@ -864,6 +895,12 @@ namespace Microsoft.Identity.Web
                 {
                     builder.WithProofOfPossession(tokenAcquisitionOptions.PoPConfiguration);
                 }
+            }
+
+            string oid = CreateCcsRoutingHintFromHttpContext();
+            if (!string.IsNullOrEmpty(oid))
+            {
+                builder.WithCcsRoutingHint(oid);
             }
 
             // Acquire an access token as a B2C authority
@@ -960,6 +997,21 @@ namespace Microsoft.Identity.Web
             }
 
             return authority;
+        }
+
+        private void LogAuthResult(AuthenticationResult? authenticationResult)
+        {
+            if (authenticationResult != null)
+            {
+                Logger.TokenAcquisitionMsalAuthenticationResultTime(
+                _logger,
+                authenticationResult.AuthenticationResultMetadata.DurationTotalInMs,
+                authenticationResult.AuthenticationResultMetadata.DurationInHttpInMs,
+                authenticationResult.AuthenticationResultMetadata.DurationInCacheInMs,
+                authenticationResult.AuthenticationResultMetadata.TokenSource.ToString(),
+                authenticationResult.CorrelationId.ToString(),
+                null);
+            }
         }
 
         private void Log(
