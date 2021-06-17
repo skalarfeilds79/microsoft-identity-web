@@ -157,13 +157,13 @@ namespace Microsoft.Identity.Web
                 context.TokenEndpointRequest.Parameters.TryGetValue(OAuthConstants.CodeVerifierKey, out string? codeVerifier);
 
                 string? clientInfo = context!.ProtocolMessage?.GetParameter(ClaimConstants.ClientInfo);
-                string? upn = string.Empty;
+                string? ccsRoutingHint = string.Empty;
                 if (!string.IsNullOrEmpty(clientInfo))
                 {
                     ClientInfo? clientInfoFromAuthorize = ClientInfo.CreateFromJson(clientInfo);
                     if (clientInfoFromAuthorize != null && clientInfoFromAuthorize.UniqueTenantIdentifier != null && clientInfoFromAuthorize.UniqueObjectIdentifier != null)
                     {
-                        upn = $"{clientInfoFromAuthorize.UniqueObjectIdentifier}@{clientInfoFromAuthorize.UniqueTenantIdentifier}";
+                        ccsRoutingHint = $"{clientInfoFromAuthorize.UniqueObjectIdentifier}@{clientInfoFromAuthorize.UniqueTenantIdentifier}";
                     }
                 }
 
@@ -182,9 +182,9 @@ namespace Microsoft.Identity.Web
                     builder.WithB2CAuthority(authority);
                 }
 
-                if (!string.IsNullOrEmpty(upn))
+                if (!string.IsNullOrEmpty(ccsRoutingHint))
                 {
-                    builder.WithCcsRoutingHint(upn);
+                    builder.WithCcsRoutingHint(ccsRoutingHint);
                 }
 
                 var result = await builder.ExecuteAsync()
@@ -749,8 +749,6 @@ namespace Microsoft.Identity.Web
                     string tokenUsedToCallTheWebApi = validatedToken.InnerToken == null ? validatedToken.RawData
                                                 : validatedToken.InnerToken.RawData;
 
-                    string oid = CreateCcsRoutingHintFromHttpContext();
-
                     var builder = application
                                     .AcquireTokenOnBehalfOf(
                                         scopes.Except(_scopesRequestedByMsal),
@@ -758,6 +756,7 @@ namespace Microsoft.Identity.Web
                                     .WithSendX5C(mergedOptions.SendX5C)
                                     .WithAuthority(authority);
 
+                    string oid = CreateCcsRoutingHintFromHttpContext();
                     if (!string.IsNullOrEmpty(oid))
                     {
                         builder.WithCcsRoutingHint(oid);
@@ -796,11 +795,11 @@ namespace Microsoft.Identity.Web
             ClaimsPrincipal? user = GetUserFromHttpContext();
             if (user != null)
             {
-                string? oid = user.GetHomeObjectId();
+                string? oid = user.GetObjectId();
                 string? tid = user.GetTenantId();
                 if (!string.IsNullOrEmpty(oid) && !string.IsNullOrEmpty(tid))
                 {
-                    return $"{user.GetHomeObjectId()}@{user.GetTenantId()}";
+                    return $"{oid}@{tid}";
                 }
             }
 
